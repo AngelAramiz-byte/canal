@@ -109,6 +109,40 @@ describe("canal v1: identidad por agente", () => {
     }
   });
 
+  test("clavePublica age: válida se guarda, mala se rechaza 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "canal-"));
+    const BUENA = `age1${"q".repeat(58)}`;
+    try {
+      const a = app(dir);
+      expect(
+        (
+          await req(a, "POST", "/api/canal/agentes/registrar", {
+            nombre: "x",
+            clavePublica: "no-age",
+            bootstrap: BOOT,
+          })
+        ).status,
+      ).toBe(400);
+      const ok = await req(a, "POST", "/api/canal/agentes/registrar", {
+        nombre: "grokbot",
+        clavePublica: BUENA,
+        bootstrap: BOOT,
+      });
+      expect(ok.status).toBe(201);
+      expect(((await ok.json()) as Record<string, string>).clavePublica).toBe(
+        BUENA,
+      );
+      const tela = (await (await a.request("/api/canal/telarana")).json()) as {
+        nodos: { nombre: string; clavePublica?: string }[];
+      };
+      expect(tela.nodos.find((n) => n.nombre === "grokbot")?.clavePublica).toBe(
+        BUENA,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("yo: sin token 401, con token 200", async () => {
     const dir = mkdtempSync(join(tmpdir(), "canal-"));
     try {

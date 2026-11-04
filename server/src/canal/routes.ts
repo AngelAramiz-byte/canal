@@ -9,6 +9,7 @@ import {
   nuevoToken,
 } from "./auth";
 import {
+  AGE_RE,
   ArchivoStore,
   SupaStore,
   defaultBandejaDir,
@@ -167,6 +168,7 @@ export function createCanalRoutes(options: {
     const body = (await context.req.json().catch(() => null)) as {
       nombre?: unknown;
       descripcion?: unknown;
+      clavePublica?: unknown;
       bootstrap?: unknown;
     } | null;
     if (
@@ -186,10 +188,21 @@ export function createCanalRoutes(options: {
       typeof body?.descripcion === "string" && body.descripcion.trim()
         ? body.descripcion.trim().slice(0, 280)
         : undefined;
+    const clavePublica =
+      typeof body?.clavePublica === "string" &&
+      AGE_RE.test(body.clavePublica.trim())
+        ? body.clavePublica.trim()
+        : undefined;
+    if (body?.clavePublica !== undefined && !clavePublica)
+      return context.json(
+        { error: "clavePublica debe ser un recipiente age1 válido." },
+        400,
+      );
     const agente: Agente = {
       id: nuevoId(),
       nombre,
       ...(descripcion ? { descripcion } : {}),
+      ...(clavePublica ? { clavePublica } : {}),
       tokenHash: "",
       creada: new Date().toISOString(),
     };
@@ -198,7 +211,13 @@ export function createCanalRoutes(options: {
     await store.registrar(agente);
     auditar({ tipo: "registrado", objetivo: agente.id, extra: { nombre } });
     return context.json(
-      { id: agente.id, nombre, ...(descripcion ? { descripcion } : {}), token },
+      {
+        id: agente.id,
+        nombre,
+        ...(descripcion ? { descripcion } : {}),
+        ...(clavePublica ? { clavePublica } : {}),
+        token,
+      },
       201,
     );
   });
@@ -210,6 +229,7 @@ export function createCanalRoutes(options: {
       id: r.agente.id,
       nombre: r.agente.nombre,
       ...(r.agente.descripcion ? { descripcion: r.agente.descripcion } : {}),
+      ...(r.agente.clavePublica ? { clavePublica: r.agente.clavePublica } : {}),
       creada: r.agente.creada,
     });
   });

@@ -22,9 +22,13 @@ export type Agente = {
   id: string;
   nombre: string;
   descripcion?: string;
+  clavePublica?: string;
   tokenHash: string;
   creada: string;
 };
+
+/** Recipiente age (`age1...`, X25519): lo único que viaja al server. */
+export const AGE_RE = /^age1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}$/;
 
 export type Fase = "pendiente" | "en_proceso" | "listo" | "error";
 
@@ -44,7 +48,12 @@ export type DocTarea = {
   terminada?: string;
 };
 
-export type NodoTelarana = { id: string; nombre: string; descripcion?: string };
+export type NodoTelarana = {
+  id: string;
+  nombre: string;
+  descripcion?: string;
+  clavePublica?: string;
+};
 export type AristaTelarana = {
   id: string;
   de: string;
@@ -250,9 +259,16 @@ export class ArchivoStore implements CanalStore {
         ts: doc.terminada ?? doc.creada ?? "",
       });
     }
-    const vistos = new Map<string, { id: string; descripcion?: string }>();
+    const vistos = new Map<
+      string,
+      { id: string; descripcion?: string; clavePublica?: string }
+    >();
     for (const a of this.leerReg())
-      vistos.set(a.nombre, { id: a.id, descripcion: a.descripcion });
+      vistos.set(a.nombre, {
+        id: a.id,
+        descripcion: a.descripcion,
+        clavePublica: a.clavePublica,
+      });
     for (const ar of aristas) {
       if (!vistos.has(ar.de)) vistos.set(ar.de, { id: ar.de });
       if (!vistos.has(ar.para)) vistos.set(ar.para, { id: ar.para });
@@ -261,6 +277,7 @@ export class ArchivoStore implements CanalStore {
       id: v.id,
       nombre,
       ...(v.descripcion ? { descripcion: v.descripcion } : {}),
+      ...(v.clavePublica ? { clavePublica: v.clavePublica } : {}),
     }));
     aristas.sort((a, b) => (a.ts < b.ts ? 1 : -1));
     return { nodos, aristas: aristas.slice(0, 200) };
@@ -284,34 +301,34 @@ export class SupaStore implements CanalStore {
   }
   async registrar(a: Agente) {
     const sql = this.con();
-    await sql`insert into canal_agentes (id, nombre, descripcion, token_hash, creada)
-      values (${a.id}, ${a.nombre}, ${a.descripcion ?? null}, ${a.tokenHash}, ${a.creada})`;
+    await sql`insert into canal_agentes (id, nombre, descripcion, clave_publica, token_hash, creada)
+      values (${a.id}, ${a.nombre}, ${a.descripcion ?? null}, ${a.clavePublica ?? null}, ${a.tokenHash}, ${a.creada})`;
   }
   async porId(id: string) {
     const sql = this.con();
     const rows =
-      await sql`select id, nombre, descripcion, token_hash as "tokenHash", creada
+      await sql`select id, nombre, descripcion, clave_publica as "clavePublica", token_hash as "tokenHash", creada
       from canal_agentes where id = ${id} limit 1`;
     return (rows[0] as Agente | undefined) ?? null;
   }
   async porNombre(nombre: string) {
     const sql = this.con();
     const rows =
-      await sql`select id, nombre, descripcion, token_hash as "tokenHash", creada
+      await sql`select id, nombre, descripcion, clave_publica as "clavePublica", token_hash as "tokenHash", creada
       from canal_agentes where nombre = ${nombre} limit 1`;
     return (rows[0] as Agente | undefined) ?? null;
   }
   async porTokenHash(h: string) {
     const sql = this.con();
     const rows =
-      await sql`select id, nombre, descripcion, token_hash as "tokenHash", creada
+      await sql`select id, nombre, descripcion, clave_publica as "clavePublica", token_hash as "tokenHash", creada
       from canal_agentes where token_hash = ${h} limit 1`;
     return (rows[0] as Agente | undefined) ?? null;
   }
   async listarAgentes() {
     const sql = this.con();
     const rows =
-      await sql`select id, nombre, descripcion, token_hash as "tokenHash", creada
+      await sql`select id, nombre, descripcion, clave_publica as "clavePublica", token_hash as "tokenHash", creada
       from canal_agentes order by creada asc limit 200`;
     return rows as unknown as Agente[];
   }
@@ -372,14 +389,18 @@ export class SupaStore implements CanalStore {
   async telarana() {
     const sql = this.con();
     const agentes =
-      (await sql`select id, nombre, descripcion from canal_agentes limit 200`) as unknown as {
+      (await sql`select id, nombre, descripcion, clave_publica as "clavePublica" from canal_agentes limit 200`) as unknown as {
         id: string;
         nombre: string;
         descripcion: string | null;
+        clavePublica: string | null;
       }[];
     const nombres = new Map(agentes.map((a) => [a.id, a.nombre]));
     const descrip = new Map(
       agentes.map((a) => [a.nombre, a.descripcion ?? undefined]),
+    );
+    const claves = new Map(
+      agentes.map((a) => [a.nombre, a.clavePublica ?? undefined]),
     );
     const nom = (id: string) => nombres.get(id) ?? id;
     const tareas =
@@ -395,10 +416,14 @@ export class SupaStore implements CanalStore {
         terminada: string | null;
         creada: string;
       }[];
-    const vistos = new Map<string, { id: string; descripcion?: string }>(
+    const vistos = new Map<string, { id: string; descripcion?: string; clavePublica?: string }>(
       agentes.map((a) => [
         a.nombre,
-        { id: a.id, ...(a.descripcion ? { descripcion: a.descripcion } : {}) },
+        {
+          id: a.id,
+          ...(a.descripcion ? { descripcion: a.descripcion } : {}),
+          ...(a.clavePublica ? { clavePublica: a.clavePublica } : {}),
+        },
       ]),
     );
     const aristas: AristaTelarana[] = tareas.map((t) => {
@@ -420,6 +445,7 @@ export class SupaStore implements CanalStore {
         id: v.id,
         nombre,
         ...(v.descripcion ? { descripcion: v.descripcion } : {}),
+        ...(v.clavePublica ? { clavePublica: v.clavePublica } : {}),
       })),
       aristas,
     };
