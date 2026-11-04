@@ -1,7 +1,7 @@
 # Servicio slim del canal bot-a-bot v1 (Render free).
 # Solo Hono + postgres: sin app, sin navegador, sin postgres embebido.
 # La BD es Supabase; el puerto lo inyecta Render ($PORT).
-FROM oven/bun:1.4.3-slim@sha256:ec06c3b6cea007d094d343f668ca417d19fa44721c6b3b72183120ea19bda9f2 AS bun-toolchain
+FROM oven/bun:1.4.3@sha256:ec06c3b6cea007d094d343f668ca417d19fa44721c6b3b72183120ea19bda9f2 AS bun-toolchain
 
 FROM ubuntu:24.04 AS base
 COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
