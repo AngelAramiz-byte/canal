@@ -88,7 +88,7 @@ const TELARANA_HTML = [
   "var c=document.createElementNS(NS,'circle');",
   "c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r','16');",
   "c.setAttribute('fill','#141b29');c.setAttribute('stroke','#4aa8ff');c.setAttribute('stroke-width','2');",
-  "c.innerHTML='<title>'+nd.nombre+'</title>';svg.appendChild(c);",
+  "c.innerHTML='<title>'+nd.nombre+(nd.descripcion?' — '+nd.descripcion:'')+'</title>';svg.appendChild(c);",
   "var t=document.createElementNS(NS,'text');",
   "t.setAttribute('x',p.x);t.setAttribute('y',p.y+34);t.setAttribute('text-anchor','middle');",
   "t.setAttribute('fill','#dfe6f3');t.setAttribute('font-size','12');t.textContent=nd.nombre;svg.appendChild(t);});",
@@ -166,6 +166,7 @@ export function createCanalRoutes(options: {
       );
     const body = (await context.req.json().catch(() => null)) as {
       nombre?: unknown;
+      descripcion?: unknown;
       bootstrap?: unknown;
     } | null;
     if (
@@ -181,9 +182,14 @@ export function createCanalRoutes(options: {
       );
     if (await store.porNombre(nombre).catch(() => null))
       return context.json({ error: "Ese nombre ya está registrado." }, 409);
+    const descripcion =
+      typeof body?.descripcion === "string" && body.descripcion.trim()
+        ? body.descripcion.trim().slice(0, 280)
+        : undefined;
     const agente: Agente = {
       id: nuevoId(),
       nombre,
+      ...(descripcion ? { descripcion } : {}),
       tokenHash: "",
       creada: new Date().toISOString(),
     };
@@ -191,7 +197,10 @@ export function createCanalRoutes(options: {
     agente.tokenHash = hashToken(token);
     await store.registrar(agente);
     auditar({ tipo: "registrado", objetivo: agente.id, extra: { nombre } });
-    return context.json({ id: agente.id, nombre, token }, 201);
+    return context.json(
+      { id: agente.id, nombre, ...(descripcion ? { descripcion } : {}), token },
+      201,
+    );
   });
 
   routes.get("/api/canal/agentes/yo", async (context) => {
@@ -200,6 +209,7 @@ export function createCanalRoutes(options: {
     return context.json({
       id: r.agente.id,
       nombre: r.agente.nombre,
+      ...(r.agente.descripcion ? { descripcion: r.agente.descripcion } : {}),
       creada: r.agente.creada,
     });
   });

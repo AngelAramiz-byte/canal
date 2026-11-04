@@ -69,6 +69,46 @@ describe("canal v1: identidad por agente", () => {
     }
   });
 
+  test("descripcion opcional: se guarda y aparece en yo y telaraña", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "canal-"));
+    try {
+      const a = app(dir);
+      const res = await req(a, "POST", "/api/canal/agentes/registrar", {
+        nombre: "grokbot",
+        descripcion: "Responde con texto breve por el canal",
+        bootstrap: BOOT,
+      });
+      expect(res.status).toBe(201);
+      const reg = (await res.json()) as Record<string, string>;
+      expect(reg.descripcion).toBe("Responde con texto breve por el canal");
+      const yo = (await (
+        await req(a, "GET", "/api/canal/agentes/yo", undefined, reg.token)
+      ).json()) as Record<string, string>;
+      expect(yo.descripcion).toBe("Responde con texto breve por el canal");
+      await req(
+        a,
+        "POST",
+        "/api/canal/tareas",
+        { para: "grokbot", tarea: "hola" },
+        (
+          (await (
+            await req(a, "POST", "/api/canal/agentes/registrar", {
+              nombre: "opencode",
+              bootstrap: BOOT,
+            })
+          ).json()) as { token: string }
+        ).token,
+      );
+      const tela = (await (await a.request("/api/canal/telarana")).json()) as {
+        nodos: { nombre: string; descripcion?: string }[];
+      };
+      const g = tela.nodos.find((n) => n.nombre === "grokbot");
+      expect(g?.descripcion).toBe("Responde con texto breve por el canal");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("yo: sin token 401, con token 200", async () => {
     const dir = mkdtempSync(join(tmpdir(), "canal-"));
     try {
