@@ -1369,7 +1369,19 @@ export function createApp(
     createCanalRoutes({
       bootstrap: process.env.CANAL_BOOTSTRAP,
       databaseUrl: process.env.CANAL_DATABASE_URL,
-      auditStore,
+      audit: auditStore
+        ? (evento) =>
+            void recordAuditEvent(auditStore, {
+              eventType:
+                evento.tipo === "registrado"
+                  ? "credential.created"
+                  : "channel.routed",
+              targetType: "canal",
+              targetId: evento.objetivo,
+              initiator: DEPLOYMENT_INITIATOR,
+              payload: evento.extra,
+            }).catch(() => {})
+        : undefined,
     }),
   );
   // The CopilotKit runtime, behind the same session guard as every other API route. Mounted last so

@@ -15,11 +15,13 @@ import {
   type Agente,
   type CanalStore,
 } from "./store";
-import {
-  DEPLOYMENT_INITIATOR,
-  recordAuditEvent,
-  type AuditStore,
-} from "../audit";
+
+/** Auditoría mínima inyectable (el server real envuelve su audit trail). */
+export type CanalAudit = (evento: {
+  tipo: "registrado" | "enviada" | "cerrada";
+  objetivo: string;
+  extra: Record<string, unknown>;
+}) => void;
 
 /**
  * Canal bot-a-bot v1 (Render + Supabase, o local en archivos).
@@ -37,7 +39,7 @@ const TAREA_MAX = 8000;
 
 function ipDe(context: { req: { header: (n: string) => string | undefined } }) {
   const fwd = context.req.header("x-forwarded-for");
-  return (fwd ? fwd.split(",")[0] : context.req.header("x-real-ip") ?? "?")
+  return (fwd ? fwd.split(",")[0] : (context.req.header("x-real-ip") ?? "?"))
     .trim()
     .slice(0, 64);
 }
@@ -102,9 +104,9 @@ export function createCanalRoutes(options: {
   bootstrap?: string;
   databaseUrl?: string;
   bandejaDir?: string;
-  auditStore?: AuditStore;
+  audit?: CanalAudit;
 }) {
-  const { auditStore } = options;
+  const { audit } = options;
   const bootstrap = options.bootstrap?.trim() ? options.bootstrap.trim() : null;
   const store: CanalStore =
     options.databaseUrl?.trim() && !options.bandejaDir
@@ -117,15 +119,10 @@ export function createCanalRoutes(options: {
   const limiteApi = crearLimite(240, 60_000);
   const routes = new Hono();
 
-  const auditar = (tipo: "credential.created" | "channel.routed", objetivo: string, extra: Record<string, unknown>) => {
-    if (!auditStore) return;
-    void recordAuditEvent(auditStore, {
-      eventType: tipo,
-      targetType: "canal",
-      targetId: objetivo,
-      initiator: DEPLOYMENT_INITIATOR,
-      payload: extra,
-    }).catch(() => {});
+  const auditar: CanalAudit = (evento) => {
+    try {
+      audit?.(evento);
+    } catch {}
   };
 
   const agenteDe = async (
@@ -134,12 +131,18 @@ export function createCanalRoutes(options: {
     const token = extraerBearer(request);
     if (!token || !limiteApi(`api:${token.slice(0, 12)}`))
       return {
-        res: Response.json({ error: "This endpoint is for deployment bots." }, { status: 401 }),
+        res: Response.json(
+          { error: "This endpoint is for deployment bots." },
+          { status: 401 },
+        ),
       };
     const agente = await store.porTokenHash(hashToken(token)).catch(() => null);
     if (!agente)
       return {
-        res: Response.json({ error: "This endpoint is for deployment bots." }, { status: 401 }),
+        res: Response.json(
+          { error: "This endpoint is for deployment bots." },
+          { status: 401 },
+        ),
       };
     return { agente };
   };
@@ -152,9 +155,15 @@ export function createCanalRoutes(options: {
   // Registro: una vez por agente, con el secreto de alta. Devuelve el token UNA vez.
   routes.post("/api/canal/agentes/registrar", async (context) => {
     if (!bootstrap)
-      return context.json({ error: "Registro cerrado en este despliegue." }, 503);
+      return context.json(
+        { error: "Registro cerrado en este despliegue." },
+        503,
+      );
     if (!limiteRegistro(`reg:${ipDe(context)}`))
-      return context.json({ error: "Demasiados intentos, espera un minuto." }, 429);
+      return context.json(
+        { error: "Demasiados intentos, espera un minuto." },
+        429,
+      );
     const body = (await context.req.json().catch(() => null)) as {
       nombre?: unknown;
       bootstrap?: unknown;
@@ -181,7 +190,7 @@ export function createCanalRoutes(options: {
     const token = nuevoToken();
     agente.tokenHash = hashToken(token);
     await store.registrar(agente);
-    auditar("credential.created", agente.id, { nombre });
+    auditar({ tipo: "registrado", objetivo: agente.id, extra: { nombre } });
     return context.json({ id: agente.id, nombre, token }, 201);
   });
 
@@ -217,16 +226,22 @@ export function createCanalRoutes(options: {
     const dest =
       (await store.porId(paraRaw).catch(() => null)) ??
       (await store.porNombre(paraRaw.toLowerCase()).catch(() => null));
-    if (!dest) return context.json({ error: "para no es un agente registrado." }, 404);
+    if (!dest)
+      return context.json({ error: "para no es un agente registrado." }, 404);
     if (dest.id === yo.id)
-      return context.json({ error: "No te escribas a ti mismo; usa tu memoria." }, 400);
+      return context.json(
+        { error: "No te escribas a ti mismo; usa tu memoria." },
+        400,
+      );
     const dirPed = typeof body?.dir === "string" ? body.dir.trim() : "";
     if (dirPed && !/^[A-Za-z0-9_/-]{1,120}$/.test(dirPed))
       return context.json({ error: "dir inválido." }, 400);
-    const sesionPed = typeof body?.sesion === "string" ? body.sesion.trim() : "";
+    const sesionPed =
+      typeof body?.sesion === "string" ? body.sesion.trim() : "";
     if (sesionPed && !/^ses_[A-Za-z0-9]+$/.test(sesionPed))
       return context.json({ error: "sesion debe ser un id ses_*." }, 400);
-    const destinoPed = typeof body?.destino === "string" ? body.destino.trim() : "";
+    const destinoPed =
+      typeof body?.destino === "string" ? body.destino.trim() : "";
     if (destinoPed && !ID_RE.test(destinoPed))
       return context.json({ error: "destino inválido." }, 400);
     const id = `c-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffff).toString(16)}`;
@@ -245,8 +260,9 @@ export function createCanalRoutes(options: {
         canal: "v1",
       })
       .catch(() => false);
-    if (!ok) return context.json({ error: "No se pudo escribir la tarea." }, 500);
-    auditar("channel.routed", id, { para: dest.nombre });
+    if (!ok)
+      return context.json({ error: "No se pudo escribir la tarea." }, 500);
+    auditar({ tipo: "enviada", objetivo: id, extra: { para: dest.nombre } });
     return context.json({ id, estado: "pendiente" }, 202);
   });
 
@@ -254,7 +270,9 @@ export function createCanalRoutes(options: {
   routes.get("/api/canal/bandeja/mias", async (context) => {
     const r = await agenteDe(context.req.raw);
     if ("res" in r) return r.res;
-    const tareas = await store.mias(r.agente.id, r.agente.nombre).catch(() => []);
+    const tareas = await store
+      .mias(r.agente.id, r.agente.nombre)
+      .catch(() => []);
     const nombres = new Map<string, string>();
     for (const a of await store.listarAgentes().catch(() => []))
       nombres.set(a.id, a.nombre);
@@ -265,7 +283,11 @@ export function createCanalRoutes(options: {
         estado: t.estado,
         creada: t.creada,
         ...(t.estado === "listo" || t.estado === "error"
-          ? { resumen: t.resumen ?? "", por: t.por ?? null, terminada: t.terminada ?? null }
+          ? {
+              resumen: t.resumen ?? "",
+              por: t.por ?? null,
+              terminada: t.terminada ?? null,
+            }
           : { tarea: (t.tarea ?? "").slice(0, 2000) }),
       })),
     });
@@ -303,19 +325,23 @@ export function createCanalRoutes(options: {
       sesion?: unknown;
     } | null;
     const estado = body?.estado === "error" ? "error" : "listo";
-    const resumen = typeof body?.resumen === "string" ? body.resumen.trim() : "";
+    const resumen =
+      typeof body?.resumen === "string" ? body.resumen.trim() : "";
     if (!resumen || resumen.length > 8000)
       return context.json({ error: "resumen requerido (1-8000)." }, 400);
     const sesion =
-      typeof body?.sesion === "string" && /^ses_[A-Za-z0-9]+$/.test(body.sesion.trim())
+      typeof body?.sesion === "string" &&
+      /^ses_[A-Za-z0-9]+$/.test(body.sesion.trim())
         ? body.sesion.trim()
         : null;
     const fin = await store
       .cerrarTarea(id, { estado, resumen, sesion, por: r.agente.id })
       .catch(() => "no" as const);
-    if (fin === "no") return context.json({ error: "No existe esa delegación." }, 404);
-    if (fin === "ya") return context.json({ error: "Ya tiene resultado." }, 409);
-    auditar("channel.routed", id, { estado });
+    if (fin === "no")
+      return context.json({ error: "No existe esa delegación." }, 404);
+    if (fin === "ya")
+      return context.json({ error: "Ya tiene resultado." }, 409);
+    auditar({ tipo: "cerrada", objetivo: id, extra: { estado } });
     return context.json({ id, estado }, 200);
   });
 

@@ -12,7 +12,7 @@ services:
   - type: web
     name: openbot-canal
     runtime: docker
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./Dockerfile.canal
     healthCheckPath: /health
     plan: free
     envVars:

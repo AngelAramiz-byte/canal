@@ -36,7 +36,10 @@ async function registrar(
     nombre,
     bootstrap,
   });
-  return { status: res.status, body: (await res.json()) as Record<string, string> };
+  return {
+    status: res.status,
+    body: (await res.json()) as Record<string, string>,
+  };
 }
 
 describe("canal v1: identidad por agente", () => {
@@ -73,11 +76,21 @@ describe("canal v1: identidad por agente", () => {
       const g = await registrar(a, "grokbot");
       expect((await req(a, "GET", "/api/canal/agentes/yo")).status).toBe(401);
       expect(
-        (await req(a, "GET", "/api/canal/agentes/yo", undefined, "cb_falso")).status,
+        (await req(a, "GET", "/api/canal/agentes/yo", undefined, "cb_falso"))
+          .status,
       ).toBe(401);
-      const yo = await req(a, "GET", "/api/canal/agentes/yo", undefined, g.body.token);
+      const yo = await req(
+        a,
+        "GET",
+        "/api/canal/agentes/yo",
+        undefined,
+        g.body.token,
+      );
       expect(yo.status).toBe(200);
-      expect(await yo.json()).toMatchObject({ id: g.body.id, nombre: "grokbot" });
+      expect(await yo.json()).toMatchObject({
+        id: g.body.id,
+        nombre: "grokbot",
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -89,23 +102,44 @@ describe("canal v1: identidad por agente", () => {
       const a = app(dir);
       const g = await registrar(a, "grokbot");
       const o = await registrar(a, "opencode");
-      const fantasma = await req(a, "POST", "/api/canal/tareas", {
-        para: "nadie",
-        tarea: "hola",
-      }, g.body.token);
+      const fantasma = await req(
+        a,
+        "POST",
+        "/api/canal/tareas",
+        {
+          para: "nadie",
+          tarea: "hola",
+        },
+        g.body.token,
+      );
       expect(fantasma.status).toBe(404);
-      const yo = await req(a, "POST", "/api/canal/tareas", {
-        para: "opencode",
-        tarea: "hola",
-        de: "suplantado",
-      }, g.body.token);
+      const yo = await req(
+        a,
+        "POST",
+        "/api/canal/tareas",
+        {
+          para: "opencode",
+          tarea: "hola",
+          de: "suplantado",
+        },
+        g.body.token,
+      );
       expect(yo.status).toBe(202);
       const id = ((await yo.json()) as { id: string }).id;
-      const hilo = await req(a, "GET", `/api/canal/tareas/${id}`, undefined, g.body.token);
+      const hilo = await req(
+        a,
+        "GET",
+        `/api/canal/tareas/${id}`,
+        undefined,
+        g.body.token,
+      );
       expect(hilo.status).toBe(200);
       // El tercero no es parte: 404 igual (sin oráculo).
       const ajeno = await req(
-        a, "GET", `/api/canal/tareas/${id}`, undefined,
+        a,
+        "GET",
+        `/api/canal/tareas/${id}`,
+        undefined,
         (await registrar(a, "miron")).body.token,
       );
       expect(ajeno.status).toBe(404);
@@ -121,26 +155,72 @@ describe("canal v1: identidad por agente", () => {
       const a = app(dir);
       const g = await registrar(a, "grokbot");
       const o = await registrar(a, "opencode");
-      await req(a, "POST", "/api/canal/tareas", { para: "opencode", tarea: "haz X" }, g.body.token);
-      const miasG = await req(a, "GET", "/api/canal/bandeja/mias", undefined, g.body.token);
-      expect(((await miasG.json()) as { tareas: unknown[] }).tareas.length).toBe(0);
-      const miasO = await req(a, "GET", "/api/canal/bandeja/mias", undefined, o.body.token);
-      const lista = ((await miasO.json()) as { tareas: { id: string }[] }).tareas;
+      await req(
+        a,
+        "POST",
+        "/api/canal/tareas",
+        { para: "opencode", tarea: "haz X" },
+        g.body.token,
+      );
+      const miasG = await req(
+        a,
+        "GET",
+        "/api/canal/bandeja/mias",
+        undefined,
+        g.body.token,
+      );
+      expect(
+        ((await miasG.json()) as { tareas: unknown[] }).tareas.length,
+      ).toBe(0);
+      const miasO = await req(
+        a,
+        "GET",
+        "/api/canal/bandeja/mias",
+        undefined,
+        o.body.token,
+      );
+      const lista = ((await miasO.json()) as { tareas: { id: string }[] })
+        .tareas;
       expect(lista.length).toBe(1);
       const id = lista[0].id;
       // El remitente no puede cerrar lo que envió: 403.
       expect(
-        (await req(a, "POST", `/api/canal/tareas/${id}/resultado`, { resumen: "yo" }, g.body.token)).status,
+        (
+          await req(
+            a,
+            "POST",
+            `/api/canal/tareas/${id}/resultado`,
+            { resumen: "yo" },
+            g.body.token,
+          )
+        ).status,
       ).toBe(403);
       const cierra = await req(
-        a, "POST", `/api/canal/tareas/${id}/resultado`,
-        { resumen: "hecho", sesion: "ses_abc123" }, o.body.token,
+        a,
+        "POST",
+        `/api/canal/tareas/${id}/resultado`,
+        { resumen: "hecho", sesion: "ses_abc123" },
+        o.body.token,
       );
       expect(cierra.status).toBe(200);
       expect(
-        (await req(a, "POST", `/api/canal/tareas/${id}/resultado`, { resumen: "otra" }, o.body.token)).status,
+        (
+          await req(
+            a,
+            "POST",
+            `/api/canal/tareas/${id}/resultado`,
+            { resumen: "otra" },
+            o.body.token,
+          )
+        ).status,
       ).toBe(409);
-      const ver = await req(a, "GET", `/api/canal/tareas/${id}`, undefined, g.body.token);
+      const ver = await req(
+        a,
+        "GET",
+        `/api/canal/tareas/${id}`,
+        undefined,
+        g.body.token,
+      );
       const doc = (await ver.json()) as Record<string, unknown>;
       expect(doc).toMatchObject({ estado: "listo", sesion: "ses_abc123" });
       expect(typeof doc.por).toBe("string");
@@ -155,14 +235,23 @@ describe("canal v1: identidad por agente", () => {
       const a = app(dir);
       const g = await registrar(a, "grokbot");
       await registrar(a, "opencode");
-      await req(a, "POST", "/api/canal/tareas", { para: "opencode", tarea: "secreto" }, g.body.token);
+      await req(
+        a,
+        "POST",
+        "/api/canal/tareas",
+        { para: "opencode", tarea: "secreto" },
+        g.body.token,
+      );
       const res = await a.request("/api/canal/telarana");
       expect(res.status).toBe(200);
       const tela = (await res.json()) as {
         nodos: { nombre: string }[];
         aristas: { estado: string; tarea?: string }[];
       };
-      expect(tela.nodos.map((n) => n.nombre).sort()).toEqual(["grokbot", "opencode"]);
+      expect(tela.nodos.map((n) => n.nombre).sort()).toEqual([
+        "grokbot",
+        "opencode",
+      ]);
       expect(tela.aristas.length).toBe(1);
       expect(tela.aristas[0].estado).toBe("pendiente");
       expect(tela.aristas[0].tarea).toBeUndefined();

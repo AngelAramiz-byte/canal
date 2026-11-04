@@ -63,7 +63,12 @@ export interface CanalStore {
   mias(agenteId: string, nombre: string): Promise<DocTarea[]>;
   cerrarTarea(
     id: string,
-    res: { estado: "listo" | "error"; resumen: string; sesion: string | null; por: string },
+    res: {
+      estado: "listo" | "error";
+      resumen: string;
+      sesion: string | null;
+      por: string;
+    },
   ): Promise<"ok" | "ya" | "no">;
   telarana(): Promise<{ nodos: NodoTelarana[]; aristas: AristaTelarana[] }>;
 }
@@ -84,8 +89,7 @@ function leerJson(path: string): DocTarea | null {
 }
 
 function faseDe(ext: string, doc: DocTarea): Fase {
-  if (ext === "resultado")
-    return doc.estado === "error" ? "error" : "listo";
+  if (ext === "resultado") return doc.estado === "error" ? "error" : "listo";
   return ext === "en_proceso" ? "en_proceso" : "pendiente";
 }
 
@@ -176,7 +180,12 @@ export class ArchivoStore implements CanalStore {
   }
   async cerrarTarea(
     id: string,
-    res: { estado: "listo" | "error"; resumen: string; sesion: string | null; por: string },
+    res: {
+      estado: "listo" | "error";
+      resumen: string;
+      sesion: string | null;
+      por: string;
+    },
   ) {
     const p = this.paths(id);
     if (existsSync(p.res)) return "ya" as const;
@@ -308,13 +317,15 @@ export class SupaStore implements CanalStore {
           'pendiente', ${doc.creada})`;
       return true;
     } catch (e) {
-      if (String((e as Error)?.message ?? e).includes("duplicate")) return false;
+      if (String((e as Error)?.message ?? e).includes("duplicate"))
+        return false;
       throw e;
     }
   }
   async leerTarea(id: string) {
     const sql = this.con();
-    const rows = await sql`select id, de, para, tarea, dir, sesion, destino, estado,
+    const rows =
+      await sql`select id, de, para, tarea, dir, sesion, destino, estado,
         resumen, por, creada, terminada from canal_tareas where id = ${id} limit 1`;
     const r = rows[0] as unknown as DocTarea | undefined;
     if (!r) return null;
@@ -322,7 +333,8 @@ export class SupaStore implements CanalStore {
   }
   async mias(agenteId: string, nombre: string) {
     const sql = this.con();
-    const rows = await sql`select id, de, para, tarea, dir, sesion, destino, estado,
+    const rows =
+      await sql`select id, de, para, tarea, dir, sesion, destino, estado,
         resumen, por, creada, terminada from canal_tareas
       where para = ${agenteId} or para::text = ${nombre}
       order by creada desc limit 50`;
@@ -333,38 +345,48 @@ export class SupaStore implements CanalStore {
   }
   async cerrarTarea(
     id: string,
-    res: { estado: "listo" | "error"; resumen: string; sesion: string | null; por: string },
+    res: {
+      estado: "listo" | "error";
+      resumen: string;
+      sesion: string | null;
+      por: string;
+    },
   ) {
     const sql = this.con();
     const actual =
       await sql`select estado from canal_tareas where id = ${id} limit 1`;
     if (!actual[0]) return "no" as const;
-    if ((actual[0] as { estado: string }).estado !== "pendiente") return "ya" as const;
+    if ((actual[0] as { estado: string }).estado !== "pendiente")
+      return "ya" as const;
     await sql`update canal_tareas set estado = ${res.estado}, resumen = ${res.resumen},
         sesion = ${res.sesion}, por = ${res.por}, terminada = now() where id = ${id}`;
     return "ok" as const;
   }
   async telarana() {
     const sql = this.con();
-    const agentes = (await sql`select id, nombre from canal_agentes limit 200`) as unknown as {
-      id: string;
-      nombre: string;
-    }[];
+    const agentes =
+      (await sql`select id, nombre from canal_agentes limit 200`) as unknown as {
+        id: string;
+        nombre: string;
+      }[];
     const nombres = new Map(agentes.map((a) => [a.id, a.nombre]));
     const nom = (id: string) => nombres.get(id) ?? id;
-    const tareas = (await sql`select t.id, d.nombre as de, p.nombre as para, t.estado,
+    const tareas =
+      (await sql`select t.id, d.nombre as de, p.nombre as para, t.estado,
         t.terminada, t.creada from canal_tareas t
       left join canal_agentes d on d.id = t.de
       left join canal_agentes p on p.id = t.para
       order by t.creada desc limit 200`) as unknown as {
-      id: string;
-      de: string | null;
-      para: string | null;
-      estado: Fase;
-      terminada: string | null;
-      creada: string;
-    }[];
-    const vistos = new Map<string, string>(agentes.map((a) => [a.nombre, a.id]));
+        id: string;
+        de: string | null;
+        para: string | null;
+        estado: Fase;
+        terminada: string | null;
+        creada: string;
+      }[];
+    const vistos = new Map<string, string>(
+      agentes.map((a) => [a.nombre, a.id]),
+    );
     const aristas: AristaTelarana[] = tareas.map((t) => {
       const de = t.de ?? "?";
       const para = t.para ?? "?";
