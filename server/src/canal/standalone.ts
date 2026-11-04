@@ -12,6 +12,7 @@ import { cargarSecretos } from "./infisical";
 const sec = await cargarSecretos();
 
 const app = new Hono();
+app.get("/", (context) => context.redirect("/telarana"));
 app.get("/health", (context) =>
   context.json({ status: "ok", servicio: "canal" }),
 );
