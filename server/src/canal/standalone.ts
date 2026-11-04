@@ -1,11 +1,15 @@
 import { Hono } from "hono";
 import { createCanalRoutes } from "./routes";
+import { cargarSecretos } from "./infisical";
 
 /**
  * Entrada del servicio slim (Render free): solo el canal bot-a-bot.
- * Sin app, sin navegador, sin postgres embebido: la BD es Supabase.
+ * Sin app, sin navegador, sin postgres embebido.
+ * Secretos: env directo o Infisical (fallback); la BD es Supabase.
  * Escucha en 0.0.0.0:$PORT (inyectado por Render).
  */
+
+const sec = await cargarSecretos();
 
 const app = new Hono();
 app.get("/health", (context) =>
@@ -14,8 +18,8 @@ app.get("/health", (context) =>
 app.route(
   "/",
   createCanalRoutes({
-    bootstrap: process.env.CANAL_BOOTSTRAP,
-    databaseUrl: process.env.CANAL_DATABASE_URL,
+    bootstrap: sec.bootstrap,
+    databaseUrl: sec.databaseUrl,
   }),
 );
 
