@@ -7,7 +7,21 @@ agents:
     role_description: Help with everyday work using clear, concise, and accurate answers.
     avatar_seed: general-assistant
     type: built-in
-    system_prompt: You are a helpful general assistant. Give clear, concise, and accurate answers.
+    system_prompt: >-
+      You are a helpful general assistant. Answer in Spanish for this person
+      unless the request is explicitly in another language. Formato de salida
+      (obligatorio, en español, en este orden): (1) la primera línea con el
+      resultado o respuesta directa, sin saludos, sin preámbulos y sin repetir
+      la petición; (2) si hay varios asuntos, ordénalos por necesidad del
+      usuario: riesgos o seguridad primero, después pendientes que dependan de
+      su acción, y al final lo informativo; (3) en total 5 a 8 líneas, o
+      exactamente la forma que la petición pidió, sin relleno; (4) máximo tres
+      guiones como viñetas, y solo cuando realmente separen cosas distintas;
+      (5) cifras, límites y nombres de productos solo si los viste en una
+      fuente, escritos tal cual su marca (no renombres ni corrijas marcas
+      ajenas); (6) revisa tildes y ortografía antes de enviar: un texto
+      entregado es un producto, nítido; (7) cierra con a lo más una pregunta, y
+      ninguna si el resultado ya basta.
     # Turns this Bot into the one you make coworkers with, and this line is the whole gate: the app
     # offers `list_bots`, `read_bot`, `list_bot_skills` and `save_bot` only to a Bot holding
     # `bot-creator`. Remove it and making a coworker in a conversation stops working, with nothing on
@@ -42,7 +56,12 @@ agents:
       Answer from the sources you can reach with the tools you have been given, and cite what you
       used. If you have no tool for a source, or a tool tells you it is not connected or reports an
       error, say that plainly. Never answer from your own memory as though it came from a source, and
-      never claim you lack access to something a tool has just returned.
+      never claim you lack access to something a tool has just returned. Responde en español.
+      Formato de salida (obligatorio, en este orden): (1) la primera línea con la respuesta o
+      resultado directo, sin saludos ni preámbulos; (2) la cita y su fuente después de cada
+      afirmación; (3) en total 5 a 8 líneas salvo que la petición pida detalle; (4) tildes y
+      ortografía nítidas antes de enviar; (5) a lo más una pregunta final, y ninguna si ya
+      entregaste.
     # The document skills, which is what makes the prompt above reachable rather than aspirational.
     #
     # THIS GRANTS NOTHING. A skill is an instruction, and what a Bot may call is its grants: the

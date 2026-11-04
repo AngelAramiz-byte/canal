@@ -70,6 +70,8 @@ import {
 } from "./credentials";
 import type { Database } from "./db/client";
 import { withoutStatement } from "./db/query-failure";
+import { createCanalRoutes } from "./canal/routes";
+import { createDelegacionesRoutes } from "./delegaciones/routes";
 import {
   createDeliveryRoutes,
   createDeliveryWebhookRoutes,
@@ -1345,6 +1347,31 @@ export function createApp(
       return context.json({ accepted: true }, 202);
     });
   }
+  /*
+   * Delegaciones bot-a-bot (bandeja, sin chat): un bot externo deja una tarea y
+   * la consulta por polling. Misma credencial que el worker (bots del despliegue,
+   * no personas), montada aquí junto a la otra frontera de proceso a proceso.
+   */
+  app.route(
+    "/",
+    createDelegacionesRoutes({
+      workerSecret: config.workerSharedSecret,
+      auditStore,
+    }),
+  );
+  /*
+   * Canal bot-a-bot v1 (identidad por agente: uuid + token). En Render vive con
+   * Supabase (`CANAL_DATABASE_URL`); en local cae a archivos de la bandeja.
+   * El registro exige `CANAL_BOOTSTRAP`; sin él, 503 (registro cerrado).
+   */
+  app.route(
+    "/",
+    createCanalRoutes({
+      bootstrap: process.env.CANAL_BOOTSTRAP,
+      databaseUrl: process.env.CANAL_DATABASE_URL,
+      auditStore,
+    }),
+  );
   // The CopilotKit runtime, behind the same session guard as every other API route. Mounted last so
   // its own routing under /api/copilotkit cannot shadow an OpenBot route declared above.
   if (copilotHandler) {

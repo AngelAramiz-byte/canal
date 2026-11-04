@@ -553,6 +553,9 @@ export const auditEventTypes = [
   "routine.enabled_changed",
   /* A run refused because its model is not on the team model allowlist. */
   "model.refused",
+  /* Delegaciones bot-a-bot (bandeja, sin chat): aceptadas y rehusadas. */
+  "delegation.accepted",
+  "delegation.refused",
 ] as const;
 
 export type AuditEventType = (typeof auditEventTypes)[number];

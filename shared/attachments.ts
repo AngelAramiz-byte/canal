@@ -203,6 +203,24 @@ export function classifyAttachment(mimeType: string): AttachmentKind {
   if ((ACCEPTED_TEXT_MIME as readonly string[]).includes(mediaType)) {
     return "text";
   }
+  /*
+   * A PDF rides as `text`. The kind is what EVERY gate reads — the composer's tile, the upload
+   * route's acceptance and its `MAX_FILE_BYTES` ceiling, the resolve path — and one kind with one
+   * size rule is worth a new answer that would have to be threaded through all of them. What
+   * "text" HERE must not receive is the UTF-8 read: the bytes are a container, so
+   * `extractDocumentText` would caption mojibake as a file's contents. That read is therefore
+   * branchpoint's job: `resolveAttachmentParts` (the only place stored bytes meet the model) asks
+   * the stored mime type now. The kind naming the FORMAT anyway is the reason that branch is keyed
+   * on an exact type rather than "not pdf".
+   *
+   * NOT a member of `ACCEPTED_TEXT_MIME`, DELIBERATELY. That list's claims are corroborated by an
+   * UTF-8 decode — the corroboration that stops a stripped executable riding in as `text/plain` —
+   * and no PDF is UTF-8, so a PDF there would refuse every actual PDF at the door. Instead the
+   * claim is corroborated the way images are: by a content signature, inside `sniffMimeType`
+   * (`attachment-mime.ts`), which is also why no `ACCEPTED_PDF_MIME` exists — a list of one is the
+   * exact type checked on both ends already.
+   */
+  if (mediaType === "application/pdf") return "text";
   return "unsupported";
 }
 

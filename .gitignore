@@ -24,6 +24,13 @@ app/src/lib/generated/application-config.ts
 **/.impeccable
 .wave-state.md
 
+# Local-only: estado vivo del puente (chatId), diario personal y secretos del canal.
+bridge/state.json
+registros/
+plataforma/bandeja/canal-agentes.json
+plataforma/bandeja/suscriptores.json
+plataforma/bandeja/vigilancia.off
+
 # TanStack Router scratch output
 app/.tanstack/
 
@@ -53,3 +60,6 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Added by CopilotKit CLI: browser snapshots a coding agent writes.
+.playwright-mcp/

@@ -12,6 +12,41 @@ function loadFrom(
   return async (id: string) => store[id] ?? null;
 }
 
+/**
+ * A small REAL PDF — correct objects, correct xref — whose one page is the
+ * string the PDF-extraction test reads back. Built here rather than fetched
+ * from a fixture file so the test carries no binary dependency: pdfjs reading
+ * these bytes successfully is the same pass a user's minutas PDF travels.
+ */
+const MINIMAL_PDF = (() => {
+  const lines = ["Minuta de prueba IRS", "Linea dos del documento"];
+  const contents: string[] = ["BT /F1 12 Tf"];
+  lines.forEach((line, index) => {
+    const y = 700 - index * 20;
+    contents.push(`1 0 0 1 72 ${y} Tm (${line}) Tj`);
+  });
+  const stream = `${contents.join("\n")}\nET`;
+  const raw: string[] = [
+    "%PDF-1.4",
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj",
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj`,
+    `4 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj`,
+    "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj",
+  ];
+  const offsets: number[] = [];
+  let pdf = "";
+  for (const object of raw) {
+    offsets.push(pdf.length);
+    pdf += `${object}\n`;
+  }
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${raw.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${raw.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return pdf;
+})();
+
 describe("resolving stored attachment references into model-readable content", () => {
   test("a url-source image part gets inline data, metadata preserved", async () => {
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -471,25 +506,45 @@ describe("what a stored attachment becomes is decided by its bytes, not by the p
     );
   });
 
-  test("a stored type this app cannot read becomes a note naming the type", async () => {
-    // Not reachable through today's upload route, which runs `classifyAttachment` first. It becomes
-    // reachable the day a type leaves the accepted lists with rows of it still in the table, and
-    // the answer must not be mojibake — the model has to be told it cannot see the file.
+  test("a stored PDF becomes its extracted text", async () => {
+    // Reachable since `classifyAttachment` rode PDFs onto the `text` kind and the sniff earns
+    // `application/pdf` from a `%PDF` header. The extraction must be REAL — pdfjs reading pages —
+    // not the UTF-8 read of a compressed container.
     const result = (await resolveAttachmentParts(
       partOf("document", "pdf1", "invoice.pdf"),
       loadFrom({
         pdf1: {
           mimeType: "application/pdf",
           name: "invoice.pdf",
-          bytes: Buffer.from("%PDF-1.7", "utf8"),
+          bytes: Buffer.from(MINIMAL_PDF, "latin1"),
         },
       }),
     )) as Array<Record<string, unknown>>;
 
-    expect(result[0]).toEqual({
-      type: "text",
-      text: '[attachment "invoice.pdf" is a application/pdf file, which cannot be put in front of the model]',
-    });
+    expect(result[0].type).toBe("text");
+    expect(result[0].text).toContain('Attached file "invoice.pdf":');
+    expect(result[0].text).toContain("Minuta de prueba IRS");
+  });
+
+  test("a stored PDF whose pages carry no text becomes a scan note, not an empty read", async () => {
+    // Corrupt/truncated/scan PDFs slip past the sniff's header check, and a refusal from pdfjs
+    // must reach the model as a sentence — never a bare container dump captioned as the file.
+    const result = (await resolveAttachmentParts(
+      partOf("document", "pdf2", "escaneo.pdf"),
+      loadFrom({
+        pdf2: {
+          mimeType: "application/pdf",
+          name: "escaneo.pdf",
+          bytes: Buffer.from("%PDF-1.7 sin mas contenido", "utf8"),
+        },
+      }),
+    )) as Array<Record<string, unknown>>;
+
+    expect(result[0].type).toBe("text");
+    expect(result[0].text).toContain('Attached file "escaneo.pdf":');
+    expect(result[0].text).toMatch(
+      /no extractable text|could not be parsed/,
+    );
   });
 
   test("one id named twice in a message is read once and encoded twice", async () => {

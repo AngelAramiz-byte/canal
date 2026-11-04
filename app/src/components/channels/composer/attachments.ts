@@ -159,6 +159,13 @@ function isUploadedAttachment(body: unknown): body is UploadedAttachment {
 export const FILE_PICKER_ACCEPT = [
   ...ACCEPTED_IMAGE_MIME,
   ...ACCEPTED_TEXT_MIME,
+  // A PDF is offered as `text` under the hood (see `classifyAttachment`), but
+  // the dialog's offer is by FORMAT, and a PDF is the one accepted format
+  // that is not an image and not in either accepted list — so its type and
+  // its extension are both named here. The extension carries the same
+  // renaming drift as the text extensions above: Windows hands a PDF to the
+  // dialog as `application/pdf` and plenty of platforms hand nothing.
+  "application/pdf",
   ".png",
   ".jpg",
   ".jpeg",
@@ -168,6 +175,7 @@ export const FILE_PICKER_ACCEPT = [
   ".md",
   ".csv",
   ".json",
+  ".pdf",
 ].join(",");
 
 /**

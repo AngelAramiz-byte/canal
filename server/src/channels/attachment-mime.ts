@@ -140,8 +140,52 @@ export function sniffMimeType(bytes: Uint8Array, claimed: string): string {
    */
   if (bytes.length === 0) return "application/octet-stream";
 
+  /*
+   * Normalised once, up here, rather than at its original home below the
+   * image sniff: the PDF gate and the corroboration gate both read it, and
+   * two reads of one normalisation is the drift `mediaTypeOf` exists for.
+   */
+  const normalizedClaim = mediaTypeOf(claimed);
+
   const sniffedImage = sniffImageType(bytes);
   if (sniffedImage) return sniffedImage;
+
+  /*
+   * A PDF IS THE ONE NON-IMAGE FORMAT THIS APP ACCEPTS ON ITS OWN SIGNATURE.
+   *
+   * The first four bytes of a real PDF are always `%PDF` — the header every
+   * reader requires and a writer has no honest reason to produce anywhere but
+   * the opening of the file. Checking the bytes rather than the claim means a
+   * PDF arrives under whatever the browser claimed (Telegram documents say
+   * `application/pdf`; a renamed one can say `application/octet-stream`) and
+   * is stored as what it IS, without needing a list membership this function
+   * cannot consult before its own answer feeds `classifyAttachment`.
+   *
+   * AFTER THE IMAGE SNIFF, deliberately: a bitmap picture of a page pasted
+   * into a PDF wrapper is a far rarer thing than either format alone, and
+   * nothing below this line accepts `%PDF` bytes under any other name, so
+   * there is no reordering hazard to defend.
+   */
+  if (hasSignature(bytes, [0x25, 0x50, 0x44, 0x46])) {
+    // 0x25 0x50 0x44 0x46 is "%PDF" — see the note above.
+    return "application/pdf";
+  }
+
+  /*
+   * A `application/pdf` CLAIM THIS APP DOES NOT ACCEPT IS NOT HANDED BACK
+   * BELOW, so it cannot ride through the fallthrough at the bottom of this
+   * function, which returns any shaped claim verbatim. That ride was safe
+   * while PDF was refused by name everywhere (`classifyAttachment` said
+   * `unsupported`); the day it became a kind the composer accepted, the claim
+   * gained the power to store arbitrary bytes as an accepted PDF — the exact
+   * laundering `text/plain` claims are guarded against above. So the claim is
+   * corroborated the same way: bytes that open with `%PDF` returned the
+   * signature answer on their own, and bytes that did not drop to the generic
+   * "just bytes" type `classifyAttachment` refuses.
+   */
+  if (normalizedClaim === "application/pdf") {
+    return "application/octet-stream";
+  }
 
   /*
    * `mediaTypeOf`, NOT A LOCAL COPY OF WHAT IT DOES.
@@ -164,7 +208,6 @@ export function sniffMimeType(bytes: Uint8Array, claimed: string): string {
    * it cannot assume it has been through here first, and the operation is
    * idempotent.
    */
-  const normalizedClaim = mediaTypeOf(claimed);
 
   /*
    * A text claim this app accepts is corroborated the only way text can be:

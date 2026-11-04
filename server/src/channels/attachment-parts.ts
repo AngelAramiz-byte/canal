@@ -109,7 +109,18 @@ export function attachmentIdsIn(content: unknown): string[] {
  * happen — which is the class of failure this whole function exists to avoid.
  */
 function extractDocumentText(bytes: Buffer): string {
-  const full = bytes.toString("utf8");
+  return capExtracted(bytes.toString("utf8"));
+}
+
+/**
+ * The cut above, phrased for text that did not start life as bytes this app
+ * decoded itself: a PDF's extracted text arrives here as a fully built
+ * string, and one cut it must share with a text file's is the size limit —
+ * one implementation so the truncation note cannot drift between the two
+ * files a reader of this file would name different things, and the character
+ * bound stays the character bound nobody has to look up twice.
+ */
+function capExtracted(full: string): string {
   if (full.length <= MAX_EXTRACTED_CHARACTERS) return full;
   const sliced = full.slice(0, MAX_EXTRACTED_CHARACTERS);
   const last = sliced.charCodeAt(sliced.length - 1);
@@ -117,6 +128,100 @@ function extractDocumentText(bytes: Buffer): string {
   const cut = splitAPair ? sliced.slice(0, -1) : sliced;
   return `${cut}\n\n[attachment truncated at ${cut.length} characters]`;
 }
+
+/**
+ * Text out of a PDF's bytes, or an honest sentence when there is none.
+ *
+ * A PDF is a container — compressed object streams, glyph tables, a font
+ * dictionary where plain prose left its real bytes inside other encodings —
+ * and `toString("utf8")` onto those bytes returns mojibake captioned as the
+ * file's contents. This reads the pages through pdfjs
+ * (`pdfjs-dist/legacy/build/pdf.mjs`), whose text pass is the one extraction
+ * path that handles those encodings, and joins the runs pdfjs emits with the
+ * line ends it recorded.
+ *
+ * LAZY, ONCE. pdfjs is a few megabytes and a whole document pipeline, and the
+ * run that needs it is the first run that meets a PDF; the import starts on
+ * first use and is kept for the process's life. `isEvalSupported: false`
+ * because the evaluator opens an eval hole a stored attachment should never
+ * be able to reach a server through — the fonts this deployment reads are the
+ * ones in the file, and slower is a fair price for that on every page.
+ *
+ * THE ANSWER IS NEVER AN EMPTY STRING. Every way this fails — pdfjs could not
+ * load, the file is encrypted, corrupt, malformed, or simply a scan whose
+ * pages are pictures of words — returns a sentence naming what happened,
+ * because the model cannot distinguish an empty part from "nothing in this
+ * file" and a refusal from an accident, and the upload route will not stop
+ * the rare bad row: its sniff checked a header, which corrupt bytes carry.
+ */
+export async function extractPdfText(bytes: Buffer): Promise<string> {
+  pdfjsPromise ??= import("pdfjs-dist/legacy/build/pdf.mjs")
+    .then((module) => module as unknown as PdfjsModule)
+    .catch(() => null);
+  const pdfjs = await pdfjsPromise;
+  if (!pdfjs) {
+    return "[the PDF reader could not be loaded in this deployment]";
+  }
+  try {
+    const doc = await pdfjs.getDocument({
+      data: new Uint8Array(bytes),
+      isEvalSupported: false,
+    }).promise;
+    const pages: string[] = [];
+    for (let number = 1; number <= doc.numPages; number++) {
+      const content = await (await doc.getPage(number)).getTextContent();
+      let raw = "";
+      for (const item of content.items) {
+        raw += item.str;
+        // pdfjs splits prose into runs at font and spacing changes, and only
+        // `hasEOL` knows a line ended. A run without one continues the
+        // current line, so a space joins it — words pdfjs split mid-word glue
+        // back to back better than pages glue to pages ("IRS" and "Sales"
+        // reading "IRSSales" is a loss, "acc" and "ount" reading "acc ount"
+        // is one a reader forgives).
+        if (item.hasEOL) raw += "\n";
+        else if (item.str && !item.str.endsWith(" ")) raw += " ";
+      }
+      const page = raw
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/[ \t]{2,}/g, " ")
+        .trim();
+      if (page) pages.push(page);
+    }
+    const full = pages.join("\n\n");
+    if (!full) {
+      return "[this PDF carried no extractable text — it may be a scan or an image-only export, and the model cannot read it]";
+    }
+    return capExtracted(full);
+  } catch {
+    return "[this PDF could not be parsed — it may be corrupt, encrypted, or password protected]";
+  }
+}
+
+/**
+ * The shape pdfjs must show here: the text pass and nothing else.
+ * Declared rather than broad-cast — a `getDocument` contract pdfjs versions
+ * keep, so an upgrade that breaks it breaks here loudly, not somewhere in a
+ * few hundred slides of rendering machinery this deployment never calls. Its
+ * value is still awaited through a cast, because the legacy build's entry
+ * point is a `.mjs` file TypeScript resolves only as an untyped import.
+ */
+type PdfjsModule = {
+  getDocument: (source: unknown) => {
+    promise: Promise<{
+      numPages: number,
+      getPage: (
+        number: number,
+      ) => Promise<{
+        getTextContent: () => Promise<{
+          items: Array<{ str: string; hasEOL: boolean }>;
+        }>;
+      }>;
+    }>;
+  };
+};
+
+let pdfjsPromise: Promise<PdfjsModule | null> | null = null;
 
 /**
  * What a turn does about an attachment this deployment can no longer load.
@@ -472,7 +577,20 @@ async function resolvePart(
   const kind = classifyAttachment(attachment.mimeType);
 
   if (kind === "text") {
-    const text = extractDocumentText(attachment.bytes);
+    /*
+     * THE EXTRACTOR FOLLOWS THE STORED FORMAT, NOT THE KIND. `text` is the one kind
+     * two formats share (a text file and, since `classifyAttachment` rode PDFs
+     * onto it, a PDF), and this is the single place the shared ride splits: a PDF
+     * routed to `extractDocumentText` would be its compressed bytes pushed
+     * through a UTF-8 decode — mojibake captioned as the file — while a `.txt`
+     * routed to pdfjs would be a megabyte of machinery to return one string. The
+     * stored mime type is what the sniff earned from these bytes, so the two-way
+     * split keys on it exactly.
+     */
+    const text =
+      attachment.mimeType === "application/pdf"
+        ? await extractPdfText(attachment.bytes)
+        : extractDocumentText(attachment.bytes);
     return {
       type: "text",
       text: `Attached file "${attachment.name}":\n\n${text}`,

@@ -1,0 +1,28 @@
+# Render blueprint del canal bot-a-bot v1.
+# En el dashboard: New → Web Service → este repo → usa este archivo.
+# Variables con `sync: false` SE PONEN A MANO en el dashboard (nunca aquí):
+#   CANAL_BOOTSTRAP     secreto de alta para registrar agentes (generar con
+#                       `openssl rand -base64 32`; copia en KeePass grupo OpenBot)
+#   CANAL_DATABASE_URL  pooler Supabase (service_role) tras aplicar
+#                       recursos/sql-para-dueno/03_canal.sql
+#   WORKER_SHARED_SECRET  el mismo del .env local (frontera legacy delegaciones)
+# Nota: la imagen completa en plan free puede tardar o no caber; si el primer
+# deploy falla por recursos, subir a starter (sueño + build con más RAM).
+services:
+  - type: web
+    name: openbot-canal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: WORKER_SHARED_SECRET
+        sync: false
+      - key: CANAL_BOOTSTRAP
+        sync: false
+      - key: CANAL_DATABASE_URL
+        sync: false

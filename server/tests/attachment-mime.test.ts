@@ -14,6 +14,30 @@ describe("sniffing a file's real MIME type from its bytes", () => {
     expect(sniffMimeType(bytes, "application/octet-stream")).toBe("image/png");
   });
 
+  test("recognizes a PDF signature that names no format", () => {
+    // The front door for Telegram documents: the claim may be blank or generic — the
+    // header names the file either way.
+    const bytes = new TextEncoder().encode("%PDF-1.7");
+    expect(sniffMimeType(bytes, "application/octet-stream")).toBe(
+      "application/pdf",
+    );
+  });
+
+  test("an application/pdf claim is corroborated by the same header", () => {
+    const bytes = new TextEncoder().encode("%PDF-1.4 ...");
+    expect(sniffMimeType(bytes, "application/pdf")).toBe("application/pdf");
+  });
+
+  test("an application/pdf claim on bytes that are not a PDF is refused by name", () => {
+    // Corroboration, not laundering: the claim the browser or Telegram made on bytes whose
+    // header is absent is dropped to the "just bytes" type `classifyAttachment` refuses,
+    // exactly as a text claim on non-UTF-8 bytes is above.
+    const bytes = new TextEncoder().encode("se trata de una carta sin mas");
+    expect(sniffMimeType(bytes, "application/pdf")).toBe(
+      "application/octet-stream",
+    );
+  });
+
   test("recognizes a JPEG signature", () => {
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
     expect(sniffMimeType(bytes, "application/octet-stream")).toBe("image/jpeg");
