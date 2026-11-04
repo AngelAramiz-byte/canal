@@ -6,8 +6,9 @@
 #   CANAL_DATABASE_URL  pooler Supabase (service_role) tras aplicar
 #                       recursos/sql-para-dueno/03_canal.sql
 #   WORKER_SHARED_SECRET  el mismo del .env local (frontera legacy delegaciones)
-# Nota: la imagen completa en plan free puede tardar o no caber; si el primer
-# deploy falla por recursos, subir a starter (sueño + build con más RAM).
+# Nota: `render.yaml` despliega `Dockerfile.canal` (imagen slim: solo canal +
+# Supa, sin app/navegador). La imagen completa no cabe en free (puerto 4100
+# fantasma + `KEY_ENCRYPTION_KEY`).
 services:
   - type: web
     name: openbot-canal
