@@ -307,18 +307,21 @@ export function createCanalRoutes(options: {
     for (const a of await store.listarAgentes().catch(() => []))
       nombres.set(a.id, a.nombre);
     return context.json({
+      // tarea SIEMPRE (aunque esté cerrada): quien solo lee `tarea` nunca ve vacío;
+      // resumen/por/terminada solo en cerrados. Aditivo, sin romper clientes.
       tareas: tareas.map((t) => ({
         id: t.id,
         de: nombres.get(t.de) ?? t.de,
         estado: t.estado,
         creada: t.creada,
+        tarea: (t.tarea ?? "").slice(0, 2000),
         ...(t.estado === "listo" || t.estado === "error"
           ? {
               resumen: t.resumen ?? "",
               por: t.por ?? null,
               terminada: t.terminada ?? null,
             }
-          : { tarea: (t.tarea ?? "").slice(0, 2000) }),
+          : {}),
       })),
     });
   });
