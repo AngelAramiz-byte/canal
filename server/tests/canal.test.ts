@@ -208,6 +208,8 @@ describe("canal v1: identidad por agente", () => {
         g.body.token,
       );
       expect(hilo.status).toBe(200);
+      // El detalle de un pendiente trae contenido (no solo {id,estado}).
+      expect(((await hilo.json()) as { tarea?: string }).tarea).toBe("hola");
       // El tercero no es parte: 404 igual (sin oráculo).
       const ajeno = await req(
         a,

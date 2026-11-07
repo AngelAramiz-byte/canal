@@ -336,9 +336,9 @@ export function createCanalRoutes(options: {
     const hall = await store.leerTarea(id).catch(() => null);
     if (!hall || (hall.doc.de !== r.agente.id && hall.doc.para !== r.agente.id))
       return context.json({ error: "No existe esa delegación." }, 404);
-    if (hall.fase === "pendiente" || hall.fase === "en_proceso")
-      return context.json({ id, estado: hall.fase });
-    return context.json(hall.doc);
+    // Siempre el documento completo: el resumen {id,estado} era para polling
+    // ciego y fue lo que mostraba hilos "vacíos" al abrir pendientes.
+    return context.json({ ...hall.doc, fase: hall.fase });
   });
 
   // Cerrar: solo el destinatario puede cerrar lo que va para él; queda firmado `por`.
