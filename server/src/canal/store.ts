@@ -30,7 +30,7 @@ export type Agente = {
 /** Recipiente age (`age1...`, X25519): lo único que viaja al server. */
 export const AGE_RE = /^age1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58}$/;
 
-export type Fase = "pendiente" | "en_proceso" | "listo" | "error";
+export type Fase = "pendiente" | "en_proceso" | "listo" | "error" | "papelera";
 
 export type DocTarea = {
   id: string;
@@ -81,6 +81,13 @@ export interface CanalStore {
       por: string;
     },
   ): Promise<"ok" | "ya" | "no">;
+  archivarTarea(
+    id: string,
+    por: string,
+    motivo: string | null,
+  ): Promise<"ok" | "no" | "ajeno" | "ya">;
+  purgar(corteIso: string): Promise<number>;
+  papelera(agenteId: string, nombre: string): Promise<DocTarea[]>;
   telarana(): Promise<{ nodos: NodoTelarana[]; aristas: AristaTelarana[] }>;
 }
 
@@ -155,6 +162,7 @@ export class ArchivoStore implements CanalStore {
       tarea: join(this.dir, `${id}.tarea.json`),
       proc: join(this.dir, `${id}.en_proceso.json`),
       res: join(this.dir, `${id}.resultado.json`),
+      papel: join(this.dir, `${id}.papelera.json`),
     };
   }
   async crearTarea(doc: DocTarea) {
@@ -171,9 +179,14 @@ export class ArchivoStore implements CanalStore {
       ["resultado", p.res],
       ["en_proceso", p.proc],
       ["tarea", p.tarea],
+      ["papelera", p.papel],
     ] as const) {
       const doc = leerJson(path);
-      if (doc) return { doc, fase: faseDe(ext, doc) };
+      if (doc)
+        return {
+          doc: { ...doc, canal: "v1" as const },
+          fase: (ext === "papelera" ? "papelera" : faseDe(ext, doc)) as Fase,
+        };
     }
     return null;
   }
@@ -239,6 +252,94 @@ export class ArchivoStore implements CanalStore {
       rmSync(p.tarea);
     } catch {}
     return "ok" as const;
+  }
+  async archivarTarea(id: string, por: string, motivo: string | null) {
+    const p = this.paths(id);
+    if (existsSync(p.papel)) return "ya" as const;
+    const base = leerJson(p.res) ?? leerJson(p.proc) ?? leerJson(p.tarea);
+    if (!base) return "no" as const;
+    const fase = existsSync(p.res)
+      ? "listo"
+      : existsSync(p.proc)
+        ? "en_proceso"
+        : "pendiente";
+    writeFileSync(
+      p.papel,
+      JSON.stringify(
+        {
+          ...(base as object),
+          estado: fase,
+          papelera: {
+            por,
+            ...(motivo ? { motivo } : {}),
+            en: new Date().toISOString(),
+          },
+          canal: "v1",
+        },
+        null,
+        2,
+      ),
+    );
+    for (const f of [p.res, p.proc, p.tarea]) {
+      try {
+        rmSync(f);
+      } catch {}
+    }
+    return "ok" as const;
+  }
+  async purgar(corteIso: string) {
+    let n = 0;
+    let archivos: string[] = [];
+    try {
+      archivos = readdirSync(this.dir);
+    } catch {
+      return 0;
+    }
+    for (const f of archivos) {
+      if (f.startsWith("_") || f.startsWith(".")) continue;
+      const m = /^(.+)\.tarea\.json$/.exec(f);
+      if (!m) continue;
+      const doc = leerJson(join(this.dir, f));
+      if (!doc || typeof doc !== "object") continue;
+      if (typeof doc.creada !== "string" || doc.creada >= corteIso) continue;
+      const r = await this.archivarTarea(doc.id, "purga", "auto");
+      if (r === "ok") n += 1;
+    }
+    return n;
+  }
+  async papelera(agenteId: string, nombre: string) {
+    const out: DocTarea[] = [];
+    let archivos: string[] = [];
+    try {
+      archivos = readdirSync(this.dir);
+    } catch {
+      return out;
+    }
+    for (const f of archivos) {
+      if (f.startsWith("_") || f.startsWith(".")) continue;
+      const m = /^(.+)\.papelera\.json$/.exec(f);
+      if (!m) continue;
+      const doc = leerJson(join(this.dir, f));
+      if (!doc || typeof doc !== "object") continue;
+      if (
+        doc.de !== agenteId &&
+        doc.de !== nombre &&
+        doc.para !== agenteId &&
+        doc.para !== nombre
+      )
+        continue;
+      out.push({ ...doc, canal: "v1" as const });
+    }
+    out.sort((a, b) => {
+      const ta = String(
+        (a as { papelera?: { en?: string } }).papelera?.en ?? "",
+      );
+      const tb = String(
+        (b as { papelera?: { en?: string } }).papelera?.en ?? "",
+      );
+      return ta < tb ? 1 : -1;
+    });
+    return out.slice(0, 50);
   }
   async telarana() {
     const nombres = new Map<string, string>();
@@ -365,10 +466,18 @@ export class SupaStore implements CanalStore {
     const sql = this.con();
     const rows =
       await sql`select id, de, para, tarea, dir, sesion, destino, estado,
-        resumen, por, creada, terminada from canal_tareas where id = ${id} limit 1`;
-    const r = rows[0] as unknown as DocTarea | undefined;
+        resumen, por, creada, terminada, null as papelera from canal_tareas where id = ${id} limit 1`;
+    let r = rows[0] as unknown as
+      | (DocTarea & { papelera?: unknown })
+      | undefined;
+    if (r)
+      return { doc: { ...r, canal: "v1" as const }, fase: r.estado as Fase };
+    const pr =
+      await sql`select id, de, para, tarea, dir, sesion, destino, estado,
+        resumen, por, creada, terminada, papelera from canal_papelera where id = ${id} limit 1`;
+    r = pr[0] as unknown as (DocTarea & { papelera?: unknown }) | undefined;
     if (!r) return null;
-    return { doc: { ...r, canal: "v1" as const }, fase: r.estado as Fase };
+    return { doc: { ...r, canal: "v1" as const }, fase: "papelera" as Fase };
   }
   async mias(agenteId: string, nombre: string) {
     const sql = this.con();
@@ -400,6 +509,50 @@ export class SupaStore implements CanalStore {
     await sql`update canal_tareas set estado = ${res.estado}, resumen = ${res.resumen},
         sesion = ${res.sesion}, por = ${res.por}, terminada = now() where id = ${id}`;
     return "ok" as const;
+  }
+  async archivarTarea(id: string, por: string, motivo: string | null) {
+    const sql = this.con();
+    const rows =
+      await sql`select id, de, para, tarea, dir, sesion, destino, estado, resumen, por, creada, terminada
+        from canal_tareas where id = ${id} limit 1`;
+    const t = rows[0] as unknown as DocTarea | undefined;
+    if (!t) {
+      const enPapel =
+        await sql`select id from canal_papelera where id = ${id} limit 1`;
+      if (enPapel.length > 0) return "ya" as const;
+      return "no" as const;
+    }
+    await sql.begin(async (tx) => {
+      await tx`insert into canal_papelera (id, de, para, tarea, dir, sesion, destino, estado, resumen, por, creada, terminada, archivada_por, motivo)
+        values (${t.id}, ${t.de}, ${t.para}, ${t.tarea}, ${t.dir ?? null}, ${t.sesion ?? null}, ${t.destino ?? null},
+          ${t.estado}, ${t.resumen ?? null}, ${t.por ?? null}, ${t.creada}, ${t.terminada ?? null}, ${por}, ${motivo})`;
+      await tx`delete from canal_tareas where id = ${id}`;
+    });
+    return "ok" as const;
+  }
+  async purgar(corteIso: string) {
+    const sql = this.con();
+    const viejas =
+      await sql`select id from canal_tareas where estado = 'pendiente' and creada < ${corteIso} limit 200`;
+    let n = 0;
+    for (const r of viejas as unknown as { id: string }[]) {
+      const f = await this.archivarTarea(r.id, "purga", "auto");
+      if (f === "ok") n += 1;
+    }
+    return n;
+  }
+  async papelera(agenteId: string, nombre: string) {
+    const sql = this.con();
+    const rows =
+      await sql`select id, de, para, tarea, dir, sesion, destino, estado,
+        resumen, por, creada, terminada,
+        json_build_object('por', archivada_por, 'motivo', motivo, 'en', archivada_en) as papelera
+        from canal_papelera where de = ${agenteId} or de::text = ${nombre} or para = ${agenteId} or para::text = ${nombre}
+      order by archivada_en desc limit 50`;
+    return (rows as unknown as DocTarea[]).map((r) => ({
+      ...r,
+      canal: "v1" as const,
+    }));
   }
   async telarana() {
     const sql = this.con();

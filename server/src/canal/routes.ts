@@ -402,6 +402,110 @@ export function createCanalRoutes(options: {
     return context.json({ id, estado }, 200);
   });
 
+  // Papelera: archivar un hilo (lo saca de la bandeja sin borrarlo).
+  // Solo si soy parte (lo envié o va para mí); terminal, sin restaurar en v1.
+  routes.post("/api/canal/tareas/:id/papelera", async (context) => {
+    const r = await agenteDe(context.req.raw);
+    if ("res" in r) return r.res;
+    const id = context.req.param("id");
+    if (!ID_RE.test(id) && !/^c-[a-z0-9-]+$/.test(id))
+      return context.json({ error: "id inválido." }, 400);
+    const hall = await store.leerTarea(id).catch(() => null);
+    if (!hall) return context.json({ error: "No existe esa delegación." }, 404);
+    const mio =
+      hall.doc.de === r.agente.id ||
+      hall.doc.de === r.agente.nombre ||
+      hall.doc.para === r.agente.id ||
+      hall.doc.para === r.agente.nombre;
+    if (!mio) return context.json({ error: "No existe esa delegación." }, 403);
+    if (hall.fase === "papelera")
+      return context.json({ error: "Ya está archivada." }, 409);
+    const body = (await context.req.json().catch(() => null)) as {
+      motivo?: unknown;
+    } | null;
+    const motivo =
+      typeof body?.motivo === "string" && body.motivo.trim()
+        ? body.motivo.trim().slice(0, 280)
+        : null;
+    const fin = await store
+      .archivarTarea(id, r.agente.id, motivo)
+      .catch(() => "no" as const);
+    if (fin === "no")
+      return context.json({ error: "No existe esa delegación." }, 404);
+    if (fin === "ya") return context.json({ error: "Ya está archivada." }, 409);
+    auditar({ tipo: "cerrada", objetivo: id, extra: { papelera: true } });
+    return context.json({ id, estado: "papelera" }, 200);
+  });
+
+  // Mi papelera: lo que archivé o me archivaron (de o para mí).
+  routes.get("/api/canal/papelera", async (context) => {
+    const r = await agenteDe(context.req.raw);
+    if ("res" in r) return r.res;
+    const filas = await store
+      .papelera(r.agente.id, r.agente.nombre)
+      .catch(() => []);
+    const nombres = new Map<string, string>();
+    for (const a of await store.listarAgentes().catch(() => []))
+      nombres.set(a.id, a.nombre);
+    return context.json({
+      tareas: filas.map((t) => ({
+        id: t.id,
+        de: nombres.get(t.de) ?? t.de,
+        para: nombres.get(t.para) ?? t.para,
+        estado: t.estado,
+        creada: t.creada,
+        terminada: t.terminada ?? null,
+        ...(typeof t.resumen === "string" && t.resumen
+          ? { resumen: t.resumen.slice(0, 200) }
+          : {}),
+        tarea: (t.tarea ?? "").slice(0, 200),
+      })),
+    });
+  });
+
+  // Purga: archiva pendientes viejos de TODOS (higiene contra saturación).
+  // Solo con bootstrap (admin); mueve a papelera con motivo, nada se borra.
+  routes.post("/api/canal/papelera/purgar", async (context) => {
+    if (!bootstrap)
+      return context.json(
+        { error: "Registro cerrado en este despliegue." },
+        503,
+      );
+    if (!limiteRegistro(`purga:${ipDe(context)}`))
+      return context.json(
+        { error: "Demasiados intentos, espera un minuto." },
+        429,
+      );
+    const body = (await context.req.json().catch(() => null)) as {
+      dias?: unknown;
+      bootstrap?: unknown;
+    } | null;
+    if (
+      typeof body?.bootstrap !== "string" ||
+      !igualSecreto(body.bootstrap.trim(), bootstrap)
+    )
+      return context.json({ error: "No autorizado." }, 403);
+    const dias =
+      typeof body?.dias === "number" && Number.isFinite(body.dias)
+        ? Math.floor(body.dias)
+        : NaN;
+    if (!(dias >= 1 && dias <= 365))
+      return context.json({ error: "dias debe ser 1-365." }, 400);
+    const corte = new Date(Date.now() - dias * 86_400_000).toISOString();
+    let archivadas = 0;
+    try {
+      archivadas = await store.purgar(corte);
+    } catch {
+      return context.json({ error: "No se pudo purgar." }, 500);
+    }
+    auditar({
+      tipo: "cerrada",
+      objetivo: "purga",
+      extra: { dias, archivadas },
+    });
+    return context.json({ archivadas }, 200);
+  });
+
   // Telaraña: solo metadatos (nombres, estados, tiempos). Sin contenido de tareas.
   routes.get("/api/canal/telarana", async (context) => {
     const t = await store.telarana().catch(() => ({ nodos: [], aristas: [] }));
