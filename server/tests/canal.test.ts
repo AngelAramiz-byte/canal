@@ -143,6 +143,42 @@ describe("canal v1: identidad por agente", () => {
     }
   });
 
+  test("rotar: token nuevo sirve, viejo muere, id se conserva", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "canal-"));
+    try {
+      const a = app(dir);
+      const g = await registrar(a, "grokbot");
+      const rot = await req(
+        a,
+        "POST",
+        "/api/canal/agentes/rotar",
+        {},
+        g.body.token,
+      );
+      expect(rot.status).toBe(200);
+      const nuevo = (await rot.json()) as { id: string; token: string };
+      expect(nuevo.id).toBe(g.body.id);
+      expect(nuevo.token.startsWith("cb_")).toBe(true);
+      expect(nuevo.token).not.toBe(g.body.token);
+      // Viejo muerto:
+      expect(
+        (await req(a, "GET", "/api/canal/agentes/yo", undefined, g.body.token))
+          .status,
+      ).toBe(401);
+      // Nuevo vive:
+      const yo = await req(
+        a,
+        "GET",
+        "/api/canal/agentes/yo",
+        undefined,
+        nuevo.token,
+      );
+      expect(yo.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("yo: sin token 401, con token 200", async () => {
     const dir = mkdtempSync(join(tmpdir(), "canal-"));
     try {

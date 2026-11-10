@@ -67,6 +67,7 @@ export interface CanalStore {
   porId(id: string): Promise<Agente | null>;
   porNombre(nombre: string): Promise<Agente | null>;
   porTokenHash(h: string): Promise<Agente | null>;
+  rotarToken(id: string, tokenHash: string): Promise<boolean>;
   listarAgentes(): Promise<Agente[]>;
   crearTarea(doc: DocTarea): Promise<boolean>;
   leerTarea(id: string): Promise<{ doc: DocTarea; fase: Fase } | null>;
@@ -137,6 +138,14 @@ export class ArchivoStore implements CanalStore {
   }
   async porTokenHash(h: string) {
     return this.leerReg().find((a) => a.tokenHash === h) ?? null;
+  }
+  async rotarToken(id: string, tokenHash: string) {
+    const list = this.leerReg();
+    const i = list.findIndex((a) => a.id === id);
+    if (i < 0) return false;
+    list[i] = { ...list[i], tokenHash };
+    this.guardarReg(list);
+    return true;
   }
   async listarAgentes() {
     return this.leerReg();
@@ -325,6 +334,12 @@ export class SupaStore implements CanalStore {
       from canal_agentes where token_hash = ${h} limit 1`;
     return (rows[0] as Agente | undefined) ?? null;
   }
+  async rotarToken(id: string, tokenHash: string) {
+    const sql = this.con();
+    const rows =
+      await sql`update canal_agentes set token_hash = ${tokenHash} where id = ${id} returning id`;
+    return rows.length > 0;
+  }
   async listarAgentes() {
     const sql = this.con();
     const rows =
@@ -416,7 +431,10 @@ export class SupaStore implements CanalStore {
         terminada: string | null;
         creada: string;
       }[];
-    const vistos = new Map<string, { id: string; descripcion?: string; clavePublica?: string }>(
+    const vistos = new Map<
+      string,
+      { id: string; descripcion?: string; clavePublica?: string }
+    >(
       agentes.map((a) => [
         a.nombre,
         {

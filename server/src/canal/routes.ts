@@ -117,6 +117,7 @@ export function createCanalRoutes(options: {
   // Límites por instancia (una instancia = un mapa; en Render free hay una sola.
   // Si se escala a N instancias, mover a BD).
   const limiteRegistro = crearLimite(5, 60_000);
+  const limiteRotar = crearLimite(3, 60_000);
   const limiteApi = crearLimite(240, 60_000);
   const routes = new Hono();
 
@@ -232,6 +233,29 @@ export function createCanalRoutes(options: {
       ...(r.agente.clavePublica ? { clavePublica: r.agente.clavePublica } : {}),
       creada: r.agente.creada,
     });
+  });
+
+  // Rotar token (exposición, sospecha, rutina): mismo id y nombre, hash nuevo.
+  // Requiere el token ACTUAL; el viejo muere en el acto. El nuevo se muestra UNA vez.
+  routes.post("/api/canal/agentes/rotar", async (context) => {
+    const r = await agenteDe(context.req.raw);
+    if ("res" in r) return r.res;
+    if (!limiteRotar(`rot:${r.agente.id}`))
+      return context.json(
+        { error: "Demasiados intentos, espera un minuto." },
+        429,
+      );
+    const token = nuevoToken();
+    const ok = await store
+      .rotarToken(r.agente.id, hashToken(token))
+      .catch(() => false);
+    if (!ok) return context.json({ error: "No existe ese agente." }, 404);
+    auditar({
+      tipo: "registrado",
+      objetivo: r.agente.id,
+      extra: { rotacion: true },
+    });
+    return context.json({ id: r.agente.id, nombre: r.agente.nombre, token });
   });
 
   // Enviar: el `de` siempre es el dueño del token (no se acepta suplantar).
