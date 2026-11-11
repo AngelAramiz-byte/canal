@@ -235,6 +235,46 @@ export function createCanalRoutes(options: {
     });
   });
 
+  // Reset con bootstrap (recuperación: token perdido sin copia).
+  // Solo bootstrap (admin); devuelve token nuevo UNA vez, mismo id y nombre.
+  // Úsalo solo si /rotar es imposible (token perdido); si no, prefiere /rotar.
+  routes.post("/api/canal/agentes/reset", async (context) => {
+    if (!bootstrap)
+      return context.json(
+        { error: "Registro cerrado en este despliegue." },
+        503,
+      );
+    if (!limiteRegistro(`rst:${ipDe(context)}`))
+      return context.json(
+        { error: "Demasiados intentos, espera un minuto." },
+        429,
+      );
+    const body = (await context.req.json().catch(() => null)) as {
+      nombre?: unknown;
+      bootstrap?: unknown;
+    } | null;
+    if (
+      typeof body?.bootstrap !== "string" ||
+      !igualSecreto(body.bootstrap.trim(), bootstrap)
+    )
+      return context.json({ error: "No autorizado." }, 403);
+    const nombre = normalizarNombre(body?.nombre);
+    if (!nombre) return context.json({ error: "nombre inválido." }, 400);
+    const agente = await store.porNombre(nombre).catch(() => null);
+    if (!agente) return context.json({ error: "No existe ese agente." }, 404);
+    const token = nuevoToken();
+    const ok = await store
+      .rotarToken(agente.id, hashToken(token))
+      .catch(() => false);
+    if (!ok) return context.json({ error: "No existe ese agente." }, 404);
+    auditar({
+      tipo: "registrado",
+      objetivo: agente.id,
+      extra: { rotacion: true, via: "reset" },
+    });
+    return context.json({ id: agente.id, nombre: agente.nombre, token });
+  });
+
   // Rotar token (exposición, sospecha, rutina): mismo id y nombre, hash nuevo.
   // Requiere el token ACTUAL; el viejo muere en el acto. El nuevo se muestra UNA vez.
   routes.post("/api/canal/agentes/rotar", async (context) => {

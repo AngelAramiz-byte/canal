@@ -143,6 +143,40 @@ describe("canal v1: identidad por agente", () => {
     }
   });
 
+  test("reset con bootstrap recupera token perdido sin cambiar id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "canal-"));
+    try {
+      const a = app(dir);
+      const g = await registrar(a, "grokbot");
+      expect(
+        (
+          await req(a, "POST", "/api/canal/agentes/reset", {
+            nombre: "grokbot",
+            bootstrap: "mal",
+          })
+        ).status,
+      ).toBe(403);
+      const rst = await req(a, "POST", "/api/canal/agentes/reset", {
+        nombre: "grokbot",
+        bootstrap: BOOT,
+      });
+      expect(rst.status).toBe(200);
+      const nuevo = (await rst.json()) as { id: string; token: string };
+      expect(nuevo.id).toBe(g.body.id);
+      expect(nuevo.token).not.toBe(g.body.token);
+      const yo = await req(
+        a,
+        "GET",
+        "/api/canal/agentes/yo",
+        undefined,
+        nuevo.token,
+      );
+      expect(yo.status).toBe(200);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("rotar: token nuevo sirve, viejo muere, id se conserva", async () => {
     const dir = mkdtempSync(join(tmpdir(), "canal-"));
     try {
@@ -185,7 +219,13 @@ describe("canal v1: identidad por agente", () => {
       const a = app(dir);
       const g = await registrar(a, "grokbot");
       const o = await registrar(a, "opencode");
-      await req(a, "POST", "/api/canal/tareas", { para: "opencode", tarea: "x" }, g.body.token);
+      await req(
+        a,
+        "POST",
+        "/api/canal/tareas",
+        { para: "opencode", tarea: "x" },
+        g.body.token,
+      );
       const mias0 = (await (
         await req(a, "GET", "/api/canal/bandeja/mias", undefined, o.body.token)
       ).json()) as { tareas: { id: string }[] };
@@ -194,32 +234,70 @@ describe("canal v1: identidad por agente", () => {
       // Un tercero (ni de ni para) no puede archivar: 403.
       expect(
         (
-          await req(a, "POST", `/api/canal/tareas/${id}/papelera`, {}, miron.body.token)
+          await req(
+            a,
+            "POST",
+            `/api/canal/tareas/${id}/papelera`,
+            {},
+            miron.body.token,
+          )
         ).status,
       ).toBe(403);
       const arch = await req(
-        a, "POST", `/api/canal/tareas/${id}/papelera`, { motivo: "ruido" }, o.body.token,
+        a,
+        "POST",
+        `/api/canal/tareas/${id}/papelera`,
+        { motivo: "ruido" },
+        o.body.token,
       );
       expect(arch.status).toBe(200);
       expect(
-        ((await (await req(a, "GET", "/api/canal/bandeja/mias", undefined, o.body.token)).json()) as {
-          tareas: unknown[];
-        }).tareas.length,
+        (
+          (await (
+            await req(
+              a,
+              "GET",
+              "/api/canal/bandeja/mias",
+              undefined,
+              o.body.token,
+            )
+          ).json()) as {
+            tareas: unknown[];
+          }
+        ).tareas.length,
       ).toBe(0);
       const pap = (await (
         await req(a, "GET", "/api/canal/papelera", undefined, o.body.token)
       ).json()) as { tareas: { id: string }[] };
       expect(pap.tareas.map((t) => t.id)).toContain(id);
-      const ver = await req(a, "GET", `/api/canal/tareas/${id}`, undefined, o.body.token);
+      const ver = await req(
+        a,
+        "GET",
+        `/api/canal/tareas/${id}`,
+        undefined,
+        o.body.token,
+      );
       expect(((await ver.json()) as { fase?: string }).fase).toBe("papelera");
       expect(
         (
-          await req(a, "POST", `/api/canal/tareas/${id}/resultado`, { resumen: "tarde" }, o.body.token)
+          await req(
+            a,
+            "POST",
+            `/api/canal/tareas/${id}/resultado`,
+            { resumen: "tarde" },
+            o.body.token,
+          )
         ).status,
       ).toBe(404);
       expect(
         (
-          await req(a, "POST", `/api/canal/tareas/${id}/papelera`, {}, o.body.token)
+          await req(
+            a,
+            "POST",
+            `/api/canal/tareas/${id}/papelera`,
+            {},
+            o.body.token,
+          )
         ).status,
       ).toBe(409);
     } finally {
